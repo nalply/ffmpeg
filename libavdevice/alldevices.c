@@ -61,6 +61,7 @@ void avdevice_register_all(void)
     REGISTER_INDEV   (OPENAL,           openal);
     REGISTER_OUTDEV  (OPENGL,           opengl);
     REGISTER_INOUTDEV(OSS,              oss);
+    REGISTER_INDEV   (OSXVCHAT,         osxvchat);
     REGISTER_INOUTDEV(PULSE,            pulse);
     REGISTER_INDEV   (QTKIT,            qtkit);
     REGISTER_OUTDEV  (SDL,              sdl);
