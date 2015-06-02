@@ -210,37 +210,32 @@ static void destroy_context(AVFContext* ctx)
 }
 
 static AVCaptureDevice* parse_device_name(AVFContext *ctx, char *filename) {
-    char *tmp = av_strdup(filename);
-    char *save;
-
-    if (tmp[0] != ':') {
-        ctx->filename = av_strtok(tmp,  ":", &save);
+    if (ctx->device_index == -1 && filename) {
+        sscanf(filename, "%d", &ctx->device_index);
     }
 
-    if (ctx->device_index == -1 && ctx->filename) {
-        sscanf(ctx->filename, "%d", &ctx->device_index);
-    }
-
+    int index = ctx->device_index;
     AVCaptureDevice *device = NULL;
-    if (ctx->device_index >= 0) {
-        if (ctx->device_index < num_devices()) {
-            // Todo use the index inside AVCaptureDevice
-            device = devices[ctx->device_index];
+    if (index >= 0) {
+        if (index < num_devices()) {
+            device = devices[index];
+            ctx->filename = device_info_list->devices[index]->device_description;
         } else {
             av_log(ctx, AV_LOG_ERROR, "Invalid device index\n");
             return NULL;
         }
     }
 
-    if (ctx->filename && strncmp(ctx->filename, "none", 4)) {
-        if (!strncmp(ctx->filename, "default", 7)) {
+    if (filename && strncmp(filename, "none", 4)) {
+        if (!strncmp(filename, "default", 7)) {
             device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
         } else {
-            int n = strlen(ctx->filename);
+            int n = strlen(filename);
             for (int i = 0; i < num_devices(); i++) {
                 char *description = device_info_list->devices[i]->device_description;
-                if (!strncmp(ctx->filename, description, n)) {
+                if (!strncmp(filename, description, n)) {
                     device = devices[i];
+                    ctx->filename = description;
                     break;
                 }
             }
@@ -252,7 +247,7 @@ static AVCaptureDevice* parse_device_name(AVFContext *ctx, char *filename) {
     }
 
     if (device) {
-        av_log(ctx, AV_LOG_DEBUG, "'%s' opened\n", [[device localizedName] UTF8String]);
+        av_log(ctx, AV_LOG_DEBUG, "'%s' opened\n", ctx->filename);
     }
 
     return device;
@@ -523,7 +518,7 @@ static int get_config(AVFormatContext *s)
 static int add_device_info(AVFormatContext *s, AVDeviceInfoList *list, 
     int index, const char *description, const char *model)
 {
-    av_log(s->priv_data, AV_LOG_INFO, "[%d] %s\n", index, description);
+    av_log(s->priv_data, AV_LOG_INFO, "[%d] %s (%s)\n", index, description, model);
     if (!list) return 0;
 
     AVDeviceInfo *info = av_mallocz(sizeof(AVDeviceInfo));
