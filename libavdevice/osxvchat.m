@@ -78,9 +78,17 @@ static const struct AVFPixelFormatSpec avf_pixel_formats[] = {
     { AV_PIX_FMT_NONE, 0 }
 };
 
-typedef struct
+static AVDeviceInfoList *device_info_list = NULL;
+
+typedef struct 
 {
-    AVClass*        class;
+    AVRational      framerate;
+    int             width, height;
+    enum AVPixelFormat pixel_format;
+    int             video_device_index;
+
+    int             video_stream_index;
+    char            *video_filename;
 
     int             frames_captured;
     int64_t         first_pts;
@@ -88,20 +96,39 @@ typedef struct
     pthread_cond_t  frame_wait_cond;
     id              avf_delegate;
 
-    AVRational      framerate;
-    int             width, height;
+    AVCaptureSession         *capture_session;
+    AVCaptureVideoDataOutput *video_output;
+    CMSampleBufferRef         current_frame;
+} AVFInputContext;
+
+typedef struct
+{
+    AVClass*        class;
 
     int             list_devices;
+
+    AVRational      framerate;
+    int             width, height;
+    enum AVPixelFormat pixel_format;
     int             video_device_index;
+
+    AVFInputContext *inputs;
+
     int             video_stream_index;
     char            *video_filename;
     int             num_video_devices;
 
-    enum AVPixelFormat pixel_format;
+    int             frames_captured;
+    int64_t         first_pts;
+    pthread_mutex_t frame_lock;
+    pthread_cond_t  frame_wait_cond;
+    id              avf_delegate;
 
     AVCaptureSession         *capture_session;
     AVCaptureVideoDataOutput *video_output;
     CMSampleBufferRef         current_frame;
+
+
 } AVFContext;
 
 static void lock_frames(AVFContext* ctx)
@@ -296,7 +323,7 @@ static int add_video_device(AVFormatContext *s, AVCaptureDevice *video_device)
     dispatch_queue_t queue;
 
     if (ctx->video_device_index < ctx->num_video_devices) {
-        capture_input = (AVCaptureInput*) [[[AVCaptureDeviceInput alloc] initWithDevice:video_device error:&error] autorelease];
+        capture_input = (AVCaptureInput*) [[AVCaptureDeviceInput alloc] initWithDevice:video_device error:&error];
     } else {
         capture_input = (AVCaptureInput*) video_device;
     }
@@ -453,10 +480,10 @@ static int get_video_config(AVFormatContext *s)
 }
 
 
-static int avf_add_device_info(AVDeviceInfoList *list, AVFormatContext *s,
-    int index, const char *description, const char *model, int do_log)
+static int add_device_info(AVFormatContext *s, AVDeviceInfoList *list, 
+    int index, const char *description, const char *model)
 {
-    if (do_log) av_log(s->priv_data, AV_LOG_INFO, "[%d] %s\n", index, description);
+    av_log(s->priv_data, AV_LOG_INFO, "[%d] %s\n", index, description);
     if (!list) return 0;
 
     AVDeviceInfo *info = av_mallocz(sizeof(AVDeviceInfo));
@@ -473,46 +500,43 @@ static int avf_add_device_info(AVDeviceInfoList *list, AVFormatContext *s,
     return list ? list->nb_devices : AVERROR(ENOMEM);
 }
 
-/**
- * List AVFoundation video adevices into AVDeviceInfoList.
- *
- * @param s      format context.
- * @param list   device list or NULL (to log only).
- * @param do_log log the devices if true.
- */
-static int avf_get_device_list2(struct AVFormatContext *s, struct AVDeviceInfoList *list, int do_log) 
-{
+static int fill_device_info_list(struct AVFormatContext *s, AVDeviceInfoList **list) {
     int result = 0, index;
     const char *localizedName, *modelID;
 
-    if (do_log) av_log(s->priv_data, AV_LOG_INFO, "osxvchat video inputs:\n");
+    *list = av_mallocz(sizeof(AVDeviceInfoList));
+    if (!*list) return AVERROR(ENOMEM);
+
+    av_log(s->priv_data, AV_LOG_INFO, "osxvchat video inputs:\n");
+
     NSArray *video_devices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
     for (AVCaptureDevice *device in video_devices) {
-        @autoreleasepool {
-            index         = [video_devices indexOfObject:device];
-            localizedName = [[device localizedName] UTF8String];
-            modelID       = [[device modelID] UTF8String];
+        index         = [video_devices indexOfObject:device];
+        localizedName = [[device localizedName] UTF8String];
+        modelID       = [[device modelID] UTF8String];
 
-            result = avf_add_device_info(list, s, index, localizedName, modelID, do_log);
-            if (result < 0) break;
-        }
+        result = add_device_info(s, *list, index, localizedName, modelID);
+        if (result < 0) break;
     }
-    [video_devices release];
 
     // Make the first device default if it exists.
-    if (list) list->default_device = list->nb_devices > 0 ? 0 : -1;
+    if (*list) (*list)->default_device = (*list)->nb_devices > 0 ? 0 : -1;
 
     return result;
 }
 
 static int avf_get_device_list(struct AVFormatContext *s, struct AVDeviceInfoList *list) 
 {
-   return avf_get_device_list2(s, list, FALSE);
+    int result = 0;
+    if (device_info_list == NULL) 
+        result = fill_device_info_list(s, &device_info_list);
+    
+    *list = *device_info_list; // Struct assignment
+    return result;
 }
 
 static int avf_read_header(AVFormatContext *s)
 {
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     AVFContext *ctx         = (AVFContext*)s->priv_data;
     AVCaptureDevice *video_device = nil;
 
@@ -527,7 +551,7 @@ static int avf_read_header(AVFormatContext *s)
 
     // List devices if requested
     if (ctx->list_devices) {
-        avf_get_device_list2(s, NULL, TRUE);
+        avf_get_device_list(s, NULL);
         goto fail;
     }
 
@@ -584,7 +608,6 @@ static int avf_read_header(AVFormatContext *s)
         goto fail;
     }
 
-    [pool release];
     return 0;
 
 fail:
