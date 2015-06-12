@@ -147,7 +147,8 @@ static void check_color_terminal(void)
 #endif
 }
 
-static void colored_fputs(int level, int tint, const char *str)
+
+static void colored_fputs_file(int level, int tint, const char *str, FILE* file)
 {
     int local_use_color;
     if (!*str)
@@ -162,32 +163,37 @@ static void colored_fputs(int level, int tint, const char *str)
 #if defined(_WIN32) && !defined(__MINGW32CE__) && HAVE_SETCONSOLETEXTATTRIBUTE
     if (local_use_color)
         SetConsoleTextAttribute(con, background | color[level]);
-    fputs(str, stderr);
+    fputs(str, file);
     if (local_use_color)
         SetConsoleTextAttribute(con, attr_orig);
 #else
     if (local_use_color == 1) {
-        fprintf(stderr,
+        fprintf(file,
                 "\033[%d;3%dm%s\033[0m",
                 (color[level] >> 4) & 15,
                 color[level] & 15,
                 str);
     } else if (tint && use_color == 256) {
-        fprintf(stderr,
+        fprintf(file,
                 "\033[48;5;%dm\033[38;5;%dm%s\033[0m",
                 (color[level] >> 16) & 0xff,
                 tint,
                 str);
     } else if (local_use_color == 256) {
-        fprintf(stderr,
+        fprintf(file,
                 "\033[48;5;%dm\033[38;5;%dm%s\033[0m",
                 (color[level] >> 16) & 0xff,
                 (color[level] >> 8) & 0xff,
                 str);
     } else
-        fputs(str, stderr);
+        fputs(str, file);
 #endif
 
+}
+
+static void colored_fputs(int level, int tint, const char *str)
+{
+    colored_fputs_file(level, tint, str, stderr);
 }
 
 const char *av_default_item_name(void *ptr)
@@ -290,7 +296,7 @@ void av_log_format_line(void *ptr, int level, const char *fmt, va_list vl,
     av_bprint_finalize(part+3, NULL);
 }
 
-void av_log_default_callback(void* ptr, int level, const char* fmt, va_list vl)
+void av_log_default_callback_file(FILE* file, void* ptr, int level, const char* fmt, va_list vl)
 {
     static int print_prefix = 1;
     static int count;
@@ -324,22 +330,22 @@ void av_log_default_callback(void* ptr, int level, const char* fmt, va_list vl)
         *line && line[strlen(line) - 1] != '\r'){
         count++;
         if (is_atty == 1)
-            fprintf(stderr, "    Last message repeated %d times\r", count);
+            fprintf(file, "    Last message repeated %d times\r", count);
         goto end;
     }
     if (count > 0) {
-        fprintf(stderr, "    Last message repeated %d times\n", count);
+        fprintf(file, "    Last message repeated %d times\n", count);
         count = 0;
     }
     strcpy(prev, line);
     sanitize(part[0].str);
-    colored_fputs(type[0], 0, part[0].str);
+    colored_fputs_file(type[0], 0, part[0].str, file);
     sanitize(part[1].str);
-    colored_fputs(type[1], 0, part[1].str);
+    colored_fputs_file(type[1], 0, part[1].str, file);
     sanitize(part[2].str);
-    colored_fputs(av_clip(level >> 3, 0, NB_LEVELS - 1), tint >> 8, part[2].str);
+    colored_fputs_file(av_clip(level >> 3, 0, NB_LEVELS - 1), tint >> 8, part[2].str, file);
     sanitize(part[3].str);
-    colored_fputs(av_clip(level >> 3, 0, NB_LEVELS - 1), tint >> 8, part[3].str);
+    colored_fputs_file(av_clip(level >> 3, 0, NB_LEVELS - 1), tint >> 8, part[3].str, file);
 
 #if CONFIG_VALGRIND_BACKTRACE
     if (level <= BACKTRACE_LOGLEVEL)
@@ -351,6 +357,12 @@ end:
     pthread_mutex_unlock(&mutex);
 #endif
 }
+
+void av_log_default_callback(void* ptr, int level, const char* fmt, va_list vl)
+{
+    av_log_default_callback_file(stderr, ptr, level, fmt, vl);
+}
+
 
 static void (*av_log_callback)(void*, int, const char*, va_list) =
     av_log_default_callback;

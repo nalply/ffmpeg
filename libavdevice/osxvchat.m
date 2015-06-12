@@ -682,7 +682,7 @@ static const AVOption options[] = {
 };
 
 static const AVClass avf_class = {
-    .class_name = "OSX vchat input device",
+    .class_name = "OSX vchat input device 2",
     .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
@@ -691,7 +691,7 @@ static const AVClass avf_class = {
 
 AVInputFormat ff_osxvchat_demuxer = {
     .name            = "osxvchat",
-    .long_name       = NULL_IF_CONFIG_SMALL("OSX vchat input device"),
+    .long_name       = NULL_IF_CONFIG_SMALL("OSX vchat input device 2"),
     .priv_data_size  = sizeof(AVFContext),
     .read_header     = avf_read_header,
     .read_packet     = avf_read_packet,
