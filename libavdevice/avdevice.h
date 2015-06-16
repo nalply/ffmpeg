@@ -446,11 +446,28 @@ int avdevice_capabilities_create(AVDeviceCapabilitiesQuery **caps, AVFormatConte
 void avdevice_capabilities_free(AVDeviceCapabilitiesQuery **caps, AVFormatContext *s);
 
 /**
- * Structure describes basic parameters of the device.
+ *  Structure describes a mode of the device.
+ *
+ */
+ typedef struct AVDeviceMode {
+    int min_width;
+    int max_width;
+    int min_height;
+    int max_height;
+    AVRational min_framerate;
+    AVRational max_framerate;
+ } AVDeviceMode;
+
+/**
+ * Structure describes parameters of the device.
  */
 typedef struct AVDeviceInfo {
     char *device_name;                   /**< device name, format depends on device */
     char *device_description;            /**< human friendly name */
+    enum AVPixelFormat *pix_fmts;        /**< list of supported pixel formats */
+    int nb_pix_fmts;                     /**< number of supported pixel formats */
+    AVDeviceMode *modes;                 /**< list of supported device modes */
+    int nb_modes;                        /**> number of supported device modes */
 } AVDeviceInfo;
 
 /**

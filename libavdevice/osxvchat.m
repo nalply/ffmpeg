@@ -194,11 +194,11 @@ static void destroy_context(AVFContext* ctx)
     [ctx->capture_session stopRunning];
 
     [ctx->capture_session release];
-    [ctx->output    release];
+    [ctx->output          release];
     [ctx->avf_delegate    release];
 
     ctx->capture_session = NULL;
-    ctx->output    = NULL;
+    ctx->output          = NULL;
     ctx->avf_delegate    = NULL;
 
     pthread_mutex_destroy(&ctx->frame_lock);
@@ -514,6 +514,51 @@ static int get_config(AVFormatContext *s)
     return 0;
 }
 
+static int fill_device_pixel_formats(AVFormatContext *s, AVDeviceInfo *info, AVCaptureDevice *device) {
+    int nb = 0; //...
+
+    info->nb_pix_fmts = nb;
+    info->pix_fmts = av_mallocz(nb * sizeof(enum AVPixelFormat));
+    for (int i = 0; i < nb; i++) {
+
+    }
+
+    return nb;
+}
+
+static int fill_device_modes(AVFormatContext *s, AVDeviceInfo *info, AVCaptureDevice *device) {
+    AVDeviceMode *mode = av_mallocz(sizeof(AVDeviceMode));
+    if (!mode) return AVERROR(ENOMEM);
+
+    NSArray *formats = [device formats];
+    int nb_modes = 0;
+    for (AVCaptureDeviceFormat *format in formats) {
+      nb_modes += [[format videoSupportedFrameRateRanges] count];
+    }
+
+    info->nb_modes = nb_modes;
+    info->modes = av_mallocz(nb_modes * sizeof(AVDeviceMode));
+    int index = 0;
+    for (AVCaptureDeviceFormat *format in formats) {
+        CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions([format formatDescription]);
+        NSArray *ranges = [format videoSupportedFrameRateRanges];
+
+        for (AVFrameRateRange *range in ranges) {
+            CMTime minDuration = [range minFrameDuration];
+            CMTime maxDuration = [range maxFrameDuration];
+            info->modes[index] = (AVDeviceMode){
+                .min_width = dims.width,   .max_width = dims.width,
+                .min_height = dims.height, .max_height = dims.height,
+                .min_framerate = { .num = maxDuration.timescale, .den = maxDuration.value },
+                .max_framerate = { .num = minDuration.timescale, .den = minDuration.value },
+            };
+            index++;
+        }
+    }
+
+    return nb_modes;
+}
+
 
 static int add_device_info(AVFormatContext *s, AVDeviceInfoList *list, 
     int index, const char *description, const char *model)
@@ -535,6 +580,7 @@ static int add_device_info(AVFormatContext *s, AVDeviceInfoList *list,
     return list ? list->nb_devices : AVERROR(ENOMEM);
 }
 
+
 static int fill_device_info_list(struct AVFormatContext *s, AVDeviceInfoList **list) {
     int result = 0, index, i;
     const char *localizedName, *modelID;
@@ -555,10 +601,15 @@ static int fill_device_info_list(struct AVFormatContext *s, AVDeviceInfoList **l
         index         = [nsdevices indexOfObject:device];
         localizedName = [[device localizedName] UTF8String];
         modelID       = [[device modelID] UTF8String];
-        devices[i++]  = device;
+        devices[i]    = device;
 
         result = add_device_info(s, *list, index, localizedName, modelID);
         if (result < 0) break;
+
+        result = fill_device_modes(s, (*list)->devices[i], device);
+        if (result < 0) break;
+
+        i++;
     }
 
     // Make the first device default if it exists.
@@ -568,18 +619,13 @@ static int fill_device_info_list(struct AVFormatContext *s, AVDeviceInfoList **l
 }
 
 static int avf_get_device_list(struct AVFormatContext *s, struct AVDeviceInfoList *list) {
-    int result = 0;
-    if (device_info_list == NULL) 
-        result = fill_device_info_list(s, &device_info_list);
-    
-    if (list) *list = *device_info_list; // Struct assignment
+    int result = fill_device_info_list(s, &device_info_list);
+    if (list && result) *list = *device_info_list; // Struct assignment
     return result;
 }
 
 static int avf_read_header(AVFormatContext *s) {
-    int result = 0;
-    if (device_info_list == NULL) 
-        result = avf_get_device_list(s, NULL);
+    int result = avf_get_device_list(s, NULL);
     if (result < 0) return result;
 
     AVFContext *ctx  = (AVFContext*)s->priv_data;
